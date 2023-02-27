@@ -270,13 +270,13 @@ plot_nmoles <- df_w_conc %>%
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) +
 	guides(color = guide_legend(title = NULL))
 
-#ggplot version with calibration range 
+#ggplot version with check for if calibration is ok
 plot_nmoles_ggplot <- plot_nmoles + 
-	geom_point(aes(shape = df_w_conc$area_in_calib, fill = category, color = category)) + 
+	geom_point(aes(shape = df_w_conc$area_calib_ok, fill = category, color = category)) + 
 	scale_shape_manual(values = c(21, 22)) + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL))
 plot_nmoles_ggplot
 
 #interactive plot to see individual sample names from plot above	
@@ -484,12 +484,12 @@ N_plot <- df_final %>%
 			xlab("Run Number") +
 	guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) 
 
-#ggplot version with calibration range 
+#ggplot version with check if calibration is ok
 plot_Nisotopes_ggplot <- N_plot + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
 	ylab(latex2exp::TeX("$\\delta^{15}N$")) +
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
 
 plot_Nisotopes_ggplot
 ```
@@ -510,12 +510,12 @@ O_plot <- df_final %>%
 guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) 
  
 
-#ggplot version with calibration range 
+#ggplot version with check if calibration is OK
 plot_Oisotopes_ggplot <- O_plot + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
 	ylab(latex2exp::TeX("$\\delta^{18}O$")) +
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
 
 plot_Oisotopes_ggplot
 ```
@@ -538,6 +538,7 @@ df_final %>% group_by(category, name) %>%
   iso_summarize_data_table(cutoff = 1, d15N, d15N_err, d18O, d18O_err, conc, conc_err)
 ```
 
+## Export samples
 ```{r, include=FALSE}
 df_final %>%
   filter(category %in% c("OM15", "OM16")) %>%
@@ -550,3 +551,15 @@ df_final %>%
 # saveRDS
 ``` 
 
+## Export standards data
+```{r, include=FALSE}
+df_final %>%
+  filter(category %in% c("USGS-34", "IAEA-NO3")) %>%
+  select(analysis, run_number, volume, area, name, category, conc, conc_err, d15N, d15N_err, d18O, d18O_err, compound) %>%
+write.csv(file = file.path("data", "calibrated", "run1_stds_calib_data_export.csv"))
+
+df_final %>% 
+ filter(category %in% c("USGS-34", "IAEA-NO3")) %>%
+  saveRDS(file = file.path("data", "calibrated", "df_stds_run1"))
+# saveRDS
+```

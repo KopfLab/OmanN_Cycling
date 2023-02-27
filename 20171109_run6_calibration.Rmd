@@ -89,7 +89,7 @@ df.raw <- raw_data %>%
     is_standard = str_detect(name, "(USGS|IAEA)"),
     is_sample = category %in% c("Oman")
   ) %>% #select only relevant categories from metadata for downstream processing
-  filter(category %in% c("Background", "Degassed", "N2O", "Conditioner", "OM17", "soil", "USGS34", "IAEA-NO3")) 
+  filter(category %in% c("Background", "Degassed", "N2O", "Conditioner", "OM17", "USGS34", "IAEA-NO3")) 
 
 df.raw
 ```
@@ -130,7 +130,14 @@ plot_raw_standards +
     xlab("run number") 
 
 #plot interactive version
-# ggplotly(plot_raw_standards, dynamicTicks = TRUE)
+ggplotly(plot_raw_standards, dynamicTicks = TRUE)
+```
+
+
+### Identify problematic data points
+```{r "remove problematic data points"}
+ df.raw <- df.raw %>% 
+ change_category(run_number %in% c(35), "excluded") #  35 looks off in d45 compared to other standards
 ```
 
 
@@ -246,13 +253,13 @@ plot_nmoles <- df_w_conc %>%
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) +
 	guides(color = guide_legend(title = NULL))
 
-#ggplot version with calibration range 
+#ggplot version with check if calibration is ok
 plot_nmoles_ggplot <- plot_nmoles + 
-	geom_point(aes(shape = df_w_conc$area_in_calib, fill = df_w_conc$category, color = df_w_conc$category)) + 
+	geom_point(aes(shape = df_w_conc$area_calib_ok, fill = df_w_conc$category, color = df_w_conc$category)) + 
 	scale_shape_manual(values = c(21, 22)) + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL))
 plot_nmoles_ggplot
 
 #interactive plot to see individual sample names from plot above	
@@ -260,7 +267,7 @@ ggplotly((plot_nmoles + geom_point()), tooltip=c("name", "amount.nmol_pred", "ru
 ```
 
 ```{r "exclude samples with > 10 nmoles N"}
-#exclude samples that have <5 nmoles predicted N
+#exclude samples that have >10 nmoles predicted N
 df_w_conc <- df_w_conc %>% 
  change_category(run_number == 103, "excluded") #area too large
 ```
@@ -454,12 +461,12 @@ N_plot <- df_final %>%
 			xlab("Run Number") +
 	guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) 
 
-#ggplot version with calibration range 
+#ggplot version with check if calibration is ok 
 plot_Nisotopes_ggplot <- N_plot + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
 	ylab(latex2exp::TeX("$\\delta^{15}N$")) +
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
 
 plot_Nisotopes_ggplot
 
@@ -487,12 +494,12 @@ O_plot <- df_final %>%
 guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) 
  
 
-#ggplot version with calibration range 
+#ggplot version with check if calibration us ok
 plot_Oisotopes_ggplot <- O_plot + 
 	scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
 	ylab(TeX("$\\delta^{18}O$")) +
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL), color = guide_legend(title = NULL))
 
 plot_Oisotopes_ggplot
 
@@ -522,6 +529,7 @@ df_final %>% group_by(category, name) %>%
   iso_summarize_data_table(cutoff = 1, d15N, d15N_err, d18O, d18O_err, conc, conc_err)
 ```
 
+## Export samples
 ```{r, include=FALSE}
 df_final %>%
   filter(category == "OM17" | category == "soil") %>%
@@ -532,5 +540,19 @@ df_final %>%
  filter(category == "OM17") %>% 
   saveRDS(file = file.path("data", "calibrated", "df_final_run6"))
 # saveRDS
-
 ``` 
+
+## Export standards data
+```{r, include=FALSE}
+df_final %>%
+  filter(category %in% c("USGS34", "IAEA-NO3")) %>%
+  select(analysis, run_number, volume, area, name, category, conc, conc_err, d15N, d15N_err, d18O, d18O_err, compound) %>%
+write.csv(file = file.path("data", "calibrated", "run6_stds_calib_data_export.csv"))
+
+df_final %>% 
+ filter(category %in% c("USGS34", "IAEA-NO3")) %>%
+  saveRDS(file = file.path("data", "calibrated", "df_stds_run6"))
+# saveRDS
+```
+
+

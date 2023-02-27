@@ -92,7 +92,7 @@ df.raw <- raw_data %>%
     is_sample = category %in% c("OM17"), 
   	dilution = ifelse(is.na(dilution), 1, dilution)
   ) %>% #select only relevant categories from metadata for downstream processing
-  filter(category %in% c("Background", "Degassed", "N2O", "Conditioner", "OM17", "soil", "USGS34", "IAEA-NO3", "USGS40", "USGS65", "oxidationblank")) 
+  filter(category %in% c("Background", "Degassed", "N2O", "Conditioner", "OM17", "USGS34", "IAEA-NO3", "USGS40", "USGS65", "oxidationblank")) 
 
 df.raw
 ```
@@ -141,13 +141,13 @@ plot_raw_standards +
     xlab("run number") 
 
 #plot interactive version
-# ggplotly(plot_raw_standards, dynamicTicks = TRUE)
+ggplotly(plot_raw_standards, dynamicTicks = TRUE)
 ```
 
 ### Identify problematic data points
 ```{r "remove problematic data points"}
  df.raw <- df.raw %>% 
- change_category(run_number %in% c(25, 24, 26, 27), "excluded") #  27 is too large; 24, 25, 26 too small 
+ change_category(run_number %in% c(25, 26, 27, 140), "excluded") #  27 is too large; 25, 26, 140 too small 
 #issues with sampling on mass spec?
 ```
 
@@ -276,13 +276,13 @@ plot_nmoles <- df_w_conc %>%
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) +
 	guides(color = guide_legend(title = NULL))
 
-#ggplot version with calibration range 
+#ggplot version with check for if calibration is ok 
 plot_nmoles_ggplot <- plot_nmoles + 
-	geom_point(aes(shape = df_w_conc$area_in_calib, fill = df_w_conc$category, color = df_w_conc$category)) + 
+	geom_point(aes(shape = df_w_conc$area_calib_ok, fill = df_w_conc$category, color = df_w_conc$category)) + 
 	scale_shape_manual(values = c(21, 22)) + 
 	#scale_fill_manual(values = cbPalette) + 
 	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
-	guides(shape = guide_legend(title = "In calibration range"), fill = guide_legend(title = NULL))
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL))
 plot_nmoles_ggplot
 
 #interactive plot to see individual sample names from plot above	
@@ -475,6 +475,7 @@ plot_Nisotopes_ggplot <- N_plot +
 plot_Nisotopes_ggplot
 ```
 
+## Export Sample Data
 ```{r, include=FALSE}
 df_final %>%
   filter(category == "OM17") %>%
@@ -492,3 +493,20 @@ df_final %>%
 # saveRDS
 ``` 
 
+## Export standards data
+```{r, include=FALSE}
+df_final %>%
+  filter(category %in% c("USGS34", "IAEA-NO3", "USGS40", "USGS65")) %>%
+  mutate(
+    conc = conc_uM,
+    conc_err = conc_uM_err,
+    compound = "NO3+Norg"
+  ) %>% 
+  select(analysis, run_number, volume, area, name, category, conc, conc_err, d15N, d15N_err, compound) %>%
+write.csv(file = file.path("data", "calibrated", "run5_stds_calib_data_export.csv"))
+
+df_final %>% 
+ filter(category %in% c("USGS34", "IAEA-NO3", "USGS40", "USGS65")) %>%
+  saveRDS(file = file.path("data", "calibrated", "df_stds_run5"))
+# saveRDS
+```

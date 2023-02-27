@@ -1,0 +1,507 @@
+---
+title: 'Run 10: Oman 2018 Organic N $\delta^{15}N$'
+subtitle: "Source file: 20180731_run10_calibration.Rmd"
+date: "`r Sys.Date()`"
+output:
+  html_document: 
+    css: stylesheet.css
+    fig_caption: yes
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+library(isoreader)
+library(isorunN2O)
+library(isoprocessor)
+library(stringr)
+library(readxl)
+library(latex2exp)
+library(kableExtra)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(plotly)
+library(knitr)
+opts_knit$set(root.dir = ".", output_dir = file.path("documents"))
+opts_chunk$set(
+  dev=c("png", "pdf"), dev.args=list(pdf = list(encoding="WinAnsi", useDingbats=FALSE)),
+  fig.keep="all")
+source(file.path("scripts", "functions.R"))
+```
+
+
+Organic N isotopic composition was measured using the denitrifier method coupled to GC-IRMS after a persulfate oxidation as described in the methods section of the manuscript. The following code steps through the calibration of measured isotopic values. The fluid samples processed here in this document were collected in Oman in the February 2018 field season.
+
+
+This processing script uses isoreader version `r packageVersion("isoreader")`, isorunN2O version `r packageVersion("isorunN2O")`, and isoprocessor version `r packageVersion("isoprocessor")`.
+
+
+## Load Raw Data
+### To create .rds file from folder of .dxf files for fast loading
+```{r eval = FALSE}
+#Load raw data from .dxf files
+  folder <- "180731_OM_run10"
+  raw_data <-
+    file.path("data", "raw", folder) %>%
+    iso_read_continuous_flow()
+  #look for problematic files
+ if (iso_has_problems(raw_data)) {
+   message("are these problems okay?")
+    print(iso_get_problems_summary(raw_data))
+  }
+
+#omit any files with problems and export to an .rds file
+  raw_data %>%
+    iso_omit_files_with_problems() %>%
+    iso_save("data/raw/run10_raw") 
+```
+
+### Load raw data from .rds file
+```{r "load run"}
+#load entire run
+raw_data <- iso_read_continuous_flow(file.path("data", "raw", "run10_raw.cf.rds"))
+```
+
+### Parse file information
+```{r "retrieve data"}
+df.raw <- raw_data %>% 
+  # aggregate peak data
+  iso_get_vendor_data_table(include_file_info = c(file_path, file_datetime, Row, `Identifier 1`, `Identifier 2`, Analysis)) %>% 
+  # select N2O peak (select_N2O_peak requires file field)
+  rename(file = file_id) %>% 
+  select_N2O_peak(c(310, 370)) %>% 
+  # extract relevant file information
+  mutate(folder = basename(dirname(file_path)), run_number = parse_integer(Row), analysis = parse_integer(Analysis),
+         name = `Identifier 1`, volume = parse_number(`Identifier 2`)) %>% 
+  # select relevant columns
+  select(analysis,  
+         folder, date = file_datetime, run_number, volume,
+         area = `Intensity All`, d45 = `d 45N2O/44N2O`, d46 = `d 46N2O/44N2O`) %>% 
+	 # pull in categories from metadata file instead of extracting from name
+  left_join(read_excel(file.path("data", "metadata", "180731_category_metadata.xlsx")) %>% select(-expt), by = c("analysis")) %>% 
+  # big picture categories
+  mutate(
+    is_standard = str_detect(name, "(USGS|IAEA)"),
+    is_sample = category == "Oman",
+    volume = volume/1000
+  ) %>% 
+#select only relevant categories from metadata for downstream processing
+  filter(category %in% c("Savillex", "Oxidation blank", "control", "N2O", "Conditioner", "Oman", "USGS-34", "IAEA-NO3", "USGS-40", "USGS-65"))
+
+df.raw
+``` 
+
+```{r "Calculate backgrounds"}
+df.raw <- df.raw %>%
+ # backgrounds (these are NOT used in the calibration calculations but are good for sanity checks)
+  calculate_background(area, crit = grepl("Savillex", name)) %>% 
+  calculate_oxidation_blank(area, volume, crit = grepl("Oxidation blank", name))  
+ 
+df.raw
+```
+
+
+## Summary of the raw data
+$\delta^{45}N_{2}O$ in $‰$ is represented as d45 in the data table. Raw d45 peak areas and standard deviations are reported. Two potassium nitrate isotopic standards (USGS-34 and IAEA) dissolved in HPW (high purity water) at a 37 $\mu$M concentration were spaced every 8-10 samples for calibration of  $\delta^{15}N$ of nitrate. Vials of 20 nmoles of injected N2O were also evenly spaced every 8 samples + standards to monitor drift. In addition to nitrate isotopic standards, organic N standards, USGS-40 and USGS-65 were oxidized with persulfate along with samples to constrain oxidation efficiency and constrain error associated with the oxidation protocol.
+
+```{r "raw data summary"}
+#table of average and standard deviations of peak areas, d45, and d46 for standards and controls
+df.raw %>% group_by(category, name) %>% 
+  iso_summarize_data_table(area, d45, cutoff = 2) 
+```
+
+## First look at standards
+Note: Injection volumes were half the intended 20 nmoles.
+```{r "plot standards", warning= FALSE, plotly=TRUE}
+plot_raw_standards <- df.raw %>%
+	#select just isotopic and N2O standards
+	filter(category %in% c("IAEA-NO3", "USGS-34", "N2O", "USGS-65", "USGS-40")) %>%
+  #plot with panels with ggplot  
+  iso_plot_data(
+  x = run_number, y = d45, points = TRUE,
+  # shape = 21 with fill makes data points with black borders
+  shape = 21, fill = name, size = area,
+  panel = category ~ .
+)
+
+#change to colorblind friendly palette and add axis labels
+plot_raw_standards + 
+  	scale_fill_manual(values = cbPalette) + 
+	  scale_color_manual(values = cbPalette) +
+    ylab(latex2exp::TeX("$\\delta^{45}N_{2}O$")) +
+    xlab("run number") 
+
+#plot interactive version
+ggplotly(plot_raw_standards, dynamicTicks = TRUE)
+```
+
+### Identify problematic data points
+```{r "remove problematic data points"}
+ df.raw <- df.raw %>% 
+ change_category(run_number %in% c(11, 48, 87), "excluded") # 48 and 87 are too large; 11 too small 
+```
+
+
+## Corrections
+
+### Drift correction
+Evaluate drift throughout run duration. Only minor drift is observed; linear correction applied.
+```{r}
+df.drift <- df.raw %>% evaluate_drift(d45, d46, correct = TRUE, method = "lm", correct_with = category %in% c("USGS-34", "IAEA-NO3", "N2O"), plot = TRUE)
+#linear calibration applied; new columns d45.drift, d46.drift, p.drift created
+```
+
+### $^{17}$O correction
+Correction for $^{17}$O isobaric interference in the mass 45 peak according to Kaiser et al. (2008) to derive raw $\delta^{15}N$ and $\delta^{18}O$ values.
+```{r}
+df.O17 <- df.drift %>%
+  correct_N2O_for_17O(d45.drift, d46.drift) %>% #apply the 17O corrections to the drift-corrected d45.drift and d46.drift columns
+	#corrected columns are d15.raw and 18.raw; p.17Ocor column added with correction parameters
+  select_columns(-d45, -d45.drift, -d46, -d46.drift) 
+```
+
+
+## Concentration Calibration with Isoprocessor
+
+### Load Standards
+```{r}
+#load in concentration and isotopic standards from excel file
+stds_concs <- read_excel(file.path("data", "standards", "standards_run10.xlsx"), sheet = "concentrations")
+stds_concs
+```
+
+### Generate concentration calibration
+```{r "add standards", warning = FALSE}
+df_calibp <- 
+  df.O17 %>% 
+  filter(category != "excluded") %>% #filter out excluded categories and conditioners
+  filter(category != "Conditioner") %>%
+  select(-p.17Ocor, -p.drift, -date) %>% #removed nested parameter columns
+  # add standards
+  iso_add_standards(stds_concs, match_by = name, is_std_peak = is_conc_std)  #add concentration standards
+```
+
+```{r "concentration calibration"}
+df_calib <- df_calibp %>% 
+	 mutate(amount.nmol = true_conc.uM * volume / dilution) %>% #calculate nmoles from concentration
+  iso_prepare_for_calibration() %>% 
+  iso_generate_calibration(
+    model = lm(area ~ amount.nmol - 1), #linear model where area is the response variable; the - 1 removes the implied intercept term
+    calibration = "area",
+    use_in_calib = is_conc_std) 
+
+# check for problems
+df_calib %>% iso_get_problematic_calibrations(calibration = "area")
+```
+
+## Inspect calibration
+Residuals ~10% when using a calibration that includes N org standards; using just nitrate standards this is only 2% 
+```{r warning = FALSE}
+# parameter overview table
+df_calib %>% 
+  iso_unnest_calibration_parameters(calibration = "area")
+```
+
+```{r warning=FALSE}
+# visualization of residuals
+conc_resid <- df_calib %>% 
+  iso_get_calibration_data() %>% 
+  filter(is_conc_std) %>%
+	filter(category != "excluded") %>% #filter for only standards used in calibration
+  mutate(
+    `Var: rel. residual area [%]` = 100*area_resid/area #calculate % relative residual area
+  ) %>%
+	ggplot(
+		aes(x = run_number, y =`Var: rel. residual area [%]`, color = name)) +
+			geom_point(size = 4) +
+			theme_figure() +
+	scale_color_manual(values = cbPalette) +
+			xlab("Run Number") +
+			ylab("Relative Residual Area (%)") + 
+	guides(color = guide_legend(title = NULL)) 
+	
+ggplotly(conc_resid) 
+```
+
+## Apply calibration
+
+```{r warning = FALSE}
+# apply concentration calibration
+df_w_conc <- df_calib %>% 
+  iso_apply_calibration(
+    predict = amount.nmol,
+    calibration = "area",
+    calculate_error = TRUE, #standard error using Wald method
+    predict_range = c(0, 20) #prediction range from standards
+  ) %>% 
+  iso_get_calibration_data()
+df_w_conc
+```
+
+### Check data
+```{r}
+# visualize (note that most are technically out of range of the calibration which is only defined for the narrow signal observed in standards; the rest are extrapolations beyond the calibration model)
+plot_nmoles <- df_w_conc %>%
+	filter(category != "excluded") %>%
+	ggplot(
+	#define global plot aesthetics 
+		aes(x = run_number, y = amount.nmol_pred, color = category, label = name)) +
+	scale_color_manual(values = cbPalette) + 
+	xlab("Run number") +
+	ylab("Predicted nmoles of N") +
+	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) +
+	guides(color = guide_legend(title = NULL))
+
+#ggplot version with check if calibration is ok
+plot_nmoles_ggplot <- plot_nmoles + 
+	geom_point(aes(shape = df_w_conc$area_calib_ok, fill = df_w_conc$category, color = df_w_conc$category)) + 
+	scale_shape_manual(values = c(21, 22)) + 
+	scale_fill_manual(values = cbPalette) + 
+	theme_figure(grid = TRUE, legend = TRUE, text_size = 20) + 
+	guides(shape = guide_legend(title = "Calibration OK"), fill = guide_legend(title = NULL))
+plot_nmoles_ggplot
+
+#interactive plot to see individual sample names from plot above	
+ggplotly((plot_nmoles + geom_point()), tooltip=c("name", "amount.nmol_pred", "run_number")) 
+```
+
+```{r "exclude samples with <5 nmoles N"}
+#exclude samples that have <5 nmoles predicted N
+df_w_conc <- df_w_conc %>%
+	filter(
+		if_else(is_sample == TRUE, amount.nmol_pred > 5, amount.nmol_pred > 0)
+	)
+df_w_conc
+```
+
+```{r "calculate concentration"}
+# calculate concentration
+df_w_conc <- 
+  df_w_conc %>% 
+  mutate(conc_uM = dilution * amount.nmol_pred / volume,
+         conc_uM_err = dilution * amount.nmol_pred_se / volume)
+
+# check amount and concentration data
+df_w_conc %>% filter(category != "N2O") %>%
+  group_by(category, true_conc.uM) %>% 
+  iso_generate_summary_table(
+    conc_uM,
+    amount.nmol_pred, 
+    amount.nmol_pred_se, 
+    cutoff = 2) 
+```
+
+### Yields
+Samples were all less than ~30 uM after dilution with persulfate solution, so are well constrained by standards.
+```{r}
+#calculate yields
+ df_w_conc <- df_w_conc %>% mutate(
+    colorimetric_conc = col_NOx + col_NH4, #persulfate oxidation oxidizes everything to nitrate, so the measurement is for any organic N + any oxidized speices already in the sample
+    yield = ifelse(is_standard, conc_uM/true_conc.uM, conc_uM/colorimetric_conc)
+  )
+
+
+p <- df_w_conc %>% 
+  filter(category %in% c("IAEA-NO3", "USGS-34", "USGS-40", "USGS-65")) %>% 
+  ggplot() +
+  aes(x = conc_uM, y = true_conc.uM, text = name, color = category) +
+  geom_point(size=2) +
+	scale_color_manual(values = cbPalette) +
+  geom_abline()  +
+  theme_figure() +
+	ylab("True concentration [uM]") +
+	xlab("Measured concentration [uM]") +
+	guides(color = guide_legend(title = NULL))
+ggplotly(p) 
+```
+
+
+## Delta Calibration with isorunN2O
+
+### Compare one and two step calibrations 
+```{r}
+# one step calibration
+one_step <- df_w_conc %>% 
+  # run organic d15 calibration all in one starting from raw d15
+  calibrate_d15_org(d15.raw, area, volume, standards = c("USGS-40" = -4.50, "USGS-65" = 20.68)) %>% 
+  mutate(method = "one step") %>% 
+  ungroup()
+
+# two step calibration
+two_step <- df_w_conc %>% 
+  # run regular d15 calibration
+  calibrate_d15(
+    # regular denitrifier calibration starting from raw d15
+    d15.raw, area, standards = c("USGS-34" = -1.8, "IAEA-NO3" = 4.7)) %>%
+  # followed by organic d15 calibration
+  calibrate_d15_org(
+    # now use the already nitrate calibrated d15 as starting point
+    d15.cal, area, volume, standards = c("USGS-40" = -4.50, "USGS-65" = 20.68),
+    infer_ref_gas = FALSE, infer_bgrd = FALSE) %>%
+  mutate(method = "two step") %>% 
+  ungroup()
+```
+## Check standards
+
+```{r}
+bind_rows(one_step, two_step) %>% 
+  filter(grepl("USGS-(40|65)",category)) %>% 
+  group_by(method, category) %>% 
+  iso_summarize_data_table(d15.raw, d15.cal, d15.ocal) 
+```
+
+
+### Compare parameters 
+Compare the model fit parameters between direct estimation, one-step and two-step methods.
+```{r}
+params <- bind_rows(one_step, two_step) %>% 
+  select(method, starts_with("p.")) %>%
+  rename(dir_p.bgrd_area = p.bgrd, dir_p.oblank_ratio = p.oblank) %>% 
+  # calculate direct estimate of the oblank_d15
+  mutate(
+    dir_p.oblank_d15 = (p.oblank_ratio * p.oblank_d15) / dir_p.oblank_ratio,
+    p.beta4.err =  sqrt( (p.oblank_d15.err/p.oblank_d15)^2 - (p.oblank_ratio.err/p.oblank_ratio)^2 ),
+    dir_p.oblank_d15.err = p.beta4.err/dir_p.oblank_ratio) %>% 
+  select(-p.beta4.err) %>% 
+  unique() %>% 
+  tidyr::gather(param, value, -method) %>% 
+  mutate(value = suppressWarnings(as.numeric(value))) %>% 
+  filter(!is.na(value))
+  
+params <- left_join(
+  params %>% filter(!grepl(".err", param)),
+  params %>% filter(grepl(".err", param)) %>% 
+    mutate(param = sub(".err", "", param)) %>% 
+    rename(error = value),
+  by = c("method", "param")) %>% 
+  arrange(param, method) %>% 
+  mutate(
+    method = ifelse(grepl("dir_", param), "direct", method),
+    param = sub("(dir_)?p.", "", param)) %>% 
+  unique()
+params
+
+params %>% 
+  ggplot() +
+  aes(method, value, fill = method) + 
+  geom_errorbar(aes(ymin = value - 2* error, ymax = value + 2* error)) +
+  geom_point(shape = 21, size = 5) +
+  labs(x = "", y = "error") + theme_bw()
+```
+
+## Compare the calibrations
+Looking at the difference between the two calibrations for both batches- except for background calculations, not a major difference 
+```{r single_data_plots, fig.width = 10, fig.height = 9}
+all_data <-
+  left_join(
+    two_step %>% rename(d15.ocal_2steps = d15.ocal), 
+    one_step %>% select(run_number, name, d15.ocal_1step = d15.ocal), 
+    by = c("name", "run_number")) %>% 
+  mutate(step_diff = d15.ocal_2steps - d15.ocal_1step) %>% 
+  arrange(run_number) %>% 
+  filter(category != "excluded") %>% 
+  ungroup()
+
+  (all_data %>%
+    ggplot() +
+    aes(area, abs(step_diff), text = run_number, fill = category) +
+    geom_point(size = 4, shape = 21) +
+  		scale_fill_manual(values = cbPalette) +
+    scale_y_log10(breaks = c(0.0001, 0.001, 0.01, 0.1, 1, 10), labels = function(i) paste(i)) +
+    theme_figure(text_size = 10) + labs(y = "calibrated d15 difference with one vs. two step [permil]")) %>% 
+ggplotly()
+```
+
+
+### Error estimation
+Using the maximum standard deviation of all isotopic standards and controls to make an estimate of the absolute error in the isotopic measurement. 
+```{r}
+# delta error
+d_err <- one_step %>% filter(category %in% c("IAEA-NO3", "USGS-34") | grepl("STD nitrate", name)) %>% 
+  group_by(category) %>% 
+  iso_summarize_data_table(d15.ocal, amount.nmol_pred) 
+d_err
+d15.err <- max(d_err$`d15.ocal sd`, na.rm=T)
+
+# add error estimates to sample info
+df_final <-one_step %>% 
+  select(analysis, run_number, pH, volume, area,name, category, dilution, col_NOx,col_NH4, conc_uM, conc_uM_err, yield, d15.ocal)
+df_final <- df_final %>% 
+  mutate(
+    d15N = d15.ocal,
+    d15N_err = d15.err) 
+
+df_final
+```
+
+### Check data
+```{r "Visualize Calibrated Nitrogen Isotopic Data", plotly = TRUE}
+#visualization of calibrated N isotopic data
+N_plot <- df_final %>%
+	filter(category != "excluded") %>% #remove excluded samples and standards from plot
+	ggplot(
+		aes(x = run_number, y = d15N, color = category, label = name)) +
+			geom_point(size = 4) +
+		  geom_errorbar(aes(ymax = d15N + d15N_err, ymin = d15N - d15N_err)) +
+			theme_figure() +
+	scale_color_manual(values = cbPalette) +
+			xlab("Run Number")  +
+	guides(color = guide_legend(title = NULL))
+
+#plot interactive version to see individual sample names from plot above
+N_plot_interactive <- ggplotly(N_plot + theme_bw()) %>% 
+	layout(xaxis = list(title = plotly::TeX("Run  Number")), yaxis = list(title = plotly::TeX("\\delta^{15}N"))) %>% 
+	config(mathjax = 'cdn')
+
+N_plot_interactive
+```
+
+
+## Summary
+```{r}
+df_final <- df_final %>%
+  mutate(
+    conc = conc_uM,
+    conc_err = conc_uM_err,
+    compound = "NO3+Norg"
+  )  
+
+df_final %>% group_by(category, name) %>% 
+  iso_summarize_data_table(cutoff = 1, d15N, d15N_err, conc, conc_err)
+```
+
+## Export Sample Data
+```{r, include=FALSE}
+df_final %>%
+  filter(category == "Oman") %>%
+  select(analysis, run_number, volume, area, name, category, dilution, col_NOx, col_NH4, pH, conc, conc_err, d15N, d15N_err, compound) %>%
+write.csv(file = file.path("data", "calibrated", "run10_calib_data_export.csv"))
+
+df_final %>% 
+ filter(category == "Oman") %>% 
+  saveRDS(file = file.path("data", "calibrated", "df_final_run10"))
+# saveRDS
+``` 
+
+
+## Export standards data
+```{r, include=FALSE}
+df_final %>%
+  filter(category %in% c("USGS-34", "IAEA-NO3", "USGS-40", "USGS-65")) %>%
+  select(analysis, run_number, volume, area, name, category, conc, conc_err, d15N, d15N_err, compound) %>%
+write.csv(file = file.path("data", "calibrated", "run10_stds_calib_data_export.csv"))
+
+df_final %>% 
+ filter(category %in% c("USGS-34", "IAEA-NO3")) %>%
+  saveRDS(file = file.path("data", "calibrated", "df_stds_run10"))
+# saveRDS
+```
+
