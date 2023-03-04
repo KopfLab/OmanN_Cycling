@@ -1,0 +1,474 @@
+---
+title: 'Data Exploration Post-Calibration'
+subtitle: "Source file: 2018_2015_combinedrunspostcalibration.Rmd"
+date: "`r Sys.Date()`"
+output:
+  html_document: 
+    css: stylesheet.css
+    fig_caption: yes
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+library(isorunN2O)
+library(stringr)
+library(readxl)
+library(latex2exp)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(plotly)
+library(knitr)
+library(cowplot)
+opts_knit$set(root.dir = ".", output_dir = file.path("documents"))
+opts_chunk$set(
+  dev=c("png", "pdf"), dev.args=list(pdf = list(encoding="WinAnsi", useDingbats=FALSE)),
+  fig.keep="all")
+source(file.path("scripts", "functions2.R"))
+```
+
+```{r warning=FALSE}
+## Load Data
+combined_data_2015_2016 <- bind_rows(
+	read.csv(file = (file.path("data", "calibrated", "run1_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run2_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run3_calib_data_export.csv")))) %>%      select(c(name, category, conc, conc_err, d15N, d15N_err, d18O, d18O_err, compound)) 
+
+combined_data_2017_2018 <- bind_rows(
+	read.csv(file = (file.path("data", "calibrated", "run4_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run5_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run6_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run7_calib_data_export.csv"))),
+  read.csv(file = (file.path("data", "calibrated", "run8_calib_data_export.csv"))),
+  read.csv(file = (file.path("data", "calibrated", "run9_calib_data_export.csv"))),
+  read.csv(file = (file.path("data", "calibrated", "run10_calib_data_export.csv")))) %>%
+  select(c(name, category, pH, conc, conc_err, d15N, d15N_err, d18O, d18O_err, compound))
+```
+
+```{r Reformat Data}
+#add well column for 2015 + 2016 data
+combined_data_2015_2016 <- combined_data_2015_2016 %>%
+ 	mutate(
+ 		year = case_when(
+ 			category == "OM15" ~ 2015,
+ 			category == "OM16" ~ 2016
+ 			),
+ 		id = sub("OM(\\d+)", "", name),
+ 		id2 = sub("NR", "", id), 
+ 		well = str_trim(str_replace_all(id2, "-", "")),
+ 		well = ifelse(grepl("NSHQ14", well), "NSHQ14", well),
+ 		sample = well,
+ 		rowid = row_number(),
+ 		conc = ifelse(rowid == 14 | rowid == 27, conc *2, conc), 
+ 		conc_err = ifelse(rowid == 14 | rowid == 27, conc_err *2, conc_err),
+ 		) %>% 
+ 	  #remove samples that do not have corresponding geochem data
+ 	  filter(well != "WDA16" & well != "WDA17" & well != "WAB12" & name != "OM15 NSHQ-14B")      %>% select(-c(id, id2, rowid, name, category))
+#merge in pH data for 2015 and 2016 samples
+pH <-  read_excel(file.path("data", "metadata", "metadata_15_16.xlsx")) 
+pH$year <- as.numeric(pH$year)
+pH$well <- as.factor(pH$well)
+combined_data_2015_2016 <- combined_data_2015_2016 %>%
+ 	group_by (year, well) %>%
+ 	left_join(pH) %>% ungroup()
+
+#add year and well column for 2017 + 2018 data
+combined_data_2017_2018 <- combined_data_2017_2018 %>% 
+  mutate(
+    year = ifelse(grepl("Oman", category), "2018", "2017"),
+    well = case_when(grepl("14", name) ~ "NSHQ14", grepl("71", name) ~ "WAB71", grepl("188", name) ~ "WAB188", grepl("56", name) ~ "WAB56", grepl("BA1A", name) ~ "BA1A", grepl("55", name) ~ "WAB55", grepl("rainwater", name) ~ "rainwater", grepl("BestCampsite", name) ~ "BestCampsite", grepl("105", name) ~ "WAB105", grepl("CM2A", name) ~ "CM2A", grepl("WAB103", name) ~ "WAB103", grepl("104", name) ~ "WAB104", grepl("4", name) ~ "NSHQ4"),
+    sample = case_when(grepl("14a", name) ~ "NSHQ14_18m", grepl("14b", name) ~ "NSHQ14_50m", grepl("14c", name) ~ "NSHQ14_85m", grepl("14", name) ~ "NSHQ14", grepl("71", name) ~ "WAB71", grepl("188", name) ~ "WAB188", grepl("56", name) ~ "WAB56", grepl("BA1A55", name) ~ "BA1A_55_66m", grepl("55", name) ~ "WAB55", grepl("BA1A100", name) ~ "BA1A_100_400m", grepl("rainwater", name) ~ "rainwater", grepl("BestCampsite", name) ~ "BestCampsite", grepl("105", name) ~ "WAB105", grepl("CM2A", name) ~ "CM2A", grepl("WAB103", name) ~ "WAB103", grepl("104", name) ~ "WAB104", grepl("4", name) ~ "NSHQ4")) %>% 
+	#add pH missing values
+    mutate(
+    pH = ifelse(grepl("NSHQ14_50m", sample), 11.05, pH),
+    pH = ifelse(sample == "WAB188" & year == "2017", NA, pH),
+    pH = ifelse(sample == "WAB56" & year == "2017", 10.61, pH),
+    pH = ifelse(sample == "NSHQ4" & year == "2017", 10, pH)) %>% 
+	filter(well != "BestCampsite" & name != "OM17_55a_KRR_nitrate NR") %>%      		   
+	select(-c(name, category)) %>% 
+	group_by(sample, year) %>% 
+	fill(pH, .direction = "up")
+	combined_data_2015_2016$year <- as.factor(combined_data_2015_2016$year)
+
+#combine data
+combined <- bind_rows(combined_data_2017_2018, combined_data_2015_2016)
+#add sample_id column
+combined <- combined %>% mutate(sample_id = paste0(sample, "_", year)) 
+```
+
+## Nitrite and Norg calculations 
+Nitrite and Norg isotopic compositions and concentrations are calculated by mass balance with error propagation. Isotopic compositions are only calculated for samples that have concentrations > 0 within the 1 sigma error range for the calculated concentration. 
+```{r, warning=FALSE}
+#(needs to be done in old version of isoprocessor (use R 3.4.4))
+#select just the columns needed for calculate_mass_balance function
+combined_data_massb_prep <- combined %>% select(sample_id, year, well, pH, sample, conc, conc_err, d15N, d15N_err, d18O, d18O_err, compound) 
+
+combined_data_massb <- combined_data_massb_prep %>%
+	#apply mass balance
+	calculate_mass_balance() 
+	
+
+combined_data_massb <- combined_data_massb %>%
+	ungroup() %>% 
+	#only keep samples that have a value for d15N
+	filter(!is.na(d15N)) %>%  
+	#change "NaN" to NA in datframe
+	mutate(d18O = (ifelse(d18O == "NaN", NA, d18O)),
+				 d18O_err = (ifelse(d18O_err == "NaN", NA, d18O_err)))
+
+
+combined_data_massb_filt <- combined_data_massb %>% mutate(frac_conc_err = conc_err/conc) %>% filter(compound != "NO2" | frac_conc_err < .5) %>% filter(compound != "Norg" | frac_conc_err < .5)
+	
+combined_df_final <- combined_data_massb %>% 
+	group_by(year, well, sample, pH, sample_id, compound) %>% 
+	#generate data table summarizing average and sd for wells with more than one data point per compound
+  isoprocessor::iso_summarize_data_table(conc, conc_err, d15N, d15N_err, d18O, d18O_err, cutoff = 1) %>%
+	#arrange dataframe by well, then compound, then year
+	arrange(well, sample, compound, year) %>%
+	#change "NaN" to NA in dataframe
+	mutate(`d18O mean` = (ifelse(`d18O mean` == "NaN", NA, `d18O mean`)),
+				 `d18O_err mean` = (ifelse(`d18O_err mean` == "NaN", NA, `d18O_err mean`)))
+
+combined_df_final
+
+combined_df_final_filt <- combined_df_final %>% mutate(frac_conc_err = `conc_err mean`/`conc mean`) %>% filter(compound != "NO2" | frac_conc_err < .5) %>% filter(compound != "Norg" | frac_conc_err < .5)
+```
+
+## Join with colorimetric data and fluid type
+```{r}
+colorimetric <- read_excel("data/metadata/colorimetric_NH4.xlsx") %>% mutate(year = as.factor(year))
+
+#add back colorimetric metadata
+combined_df_final_wcol <- combined_data_massb_filt %>% 
+	left_join(colorimetric, by = c("sample", "year")) %>% 
+	arrange(well, compound, year) 
+combined_df_final_wcol
+
+id <- read_excel("data/metadata/sample_id_fluidtype.xlsx")
+all_data <- left_join(combined_df_final_wcol, id)
+```
+
+## Figure 2
+Concentration of Nitrate and NH3
+```{r}
+#plot nitrate concentration as a function of pH, shape is year
+p1 <- all_data %>% filter(compound == "NO3") %>%
+  ggplot() + 
+aes(x = pH, y = conc, fill = fluid_type, colour = fluid_type, shape = year) +
+geom_point(aes(shape = year, fill = fluid_type), size = 6, colour = 'black', stroke = 1) +
+  scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater")))) +
+  labs(y = expression(paste("[NO"[3]^"-"*"] (", mu, "M)"))) +
+	ylim(0,400)+
+	theme_figure(axis_text_size = 18) +
+	theme(legend.text=element_text(size=18)) +
+  #theme(axis.text.x = element_text(face="bold", size=10, color = "black"), axis.text.y = element_text(face="bold", size=10, color = "black"), axis.title = element_text (face = "bold", size = 14, color = "black"), strip.text.x = element_text(size=14, face="bold")) +
+	theme(legend.text = element_text(color = "white"), legend.title = element_text(color = "white"))+
+guides(fill = guide_legend(override.aes = list(color = NA), title = "Fluid Type"), shape = FALSE)
+p1
+
+#plot total Nred as function of pH
+p2 <- all_data %>% 
+  ggplot() + 
+aes(x = pH, y = col_NH4, fill = fluid_type, colour = fluid_type, shape = year) +
+geom_point(aes(shape = year, fill = fluid_type), size = 6, colour = 'black', stroke = 1) +
+  scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater")))) +
+  labs(y = expression(sum(paste("NH"[3]*" (", mu, "M)")))) +
+	ylim(0,150)+
+	theme_figure(axis_text_size = 18) +
+	theme(legend.text=element_text(size=18)) +
+  #theme(axis.text.x = element_text(face="bold", size=10, color = "black"), axis.text.y = element_text(face="bold", size=10, color = "black"), axis.title = element_text (face = "bold", size = 14, color = "black"), strip.text.x = element_text(size=14, face="bold")) +
+guides(fill = guide_legend(override.aes = list(shape = 22, size = 5), title = "Fluid Type"), shape = guide_legend(title = "Year"))
+p2
+
+#arrange side by side without legend
+prow <- plot_grid(
+  p1 + theme(legend.position="none"),
+  p2 + theme(legend.position="none"),
+  align = 'vh',
+  hjust = -1,
+  nrow = 1
+)
+prow
+
+#separately save legend
+legend <- get_legend(
+  # create some space to the left of the legend
+  p2 + theme(legend.box.margin = margin(0, 0, 0, 12))
+)
+#re-add legend
+p1_2 <- plot_grid(prow, legend, rel_widths = c(2, .4))
+p1_2
+
+ggsave("Figure_2.pdf", path = "figures/", width = 14.17322, height = 7.08661, device='pdf', bg='white', dpi=300)
+```
+
+
+## Figure 3
+```{r}
+colors_fluids_named <- c("Ca_OH" = "#330099", "gabbro" = "#669900", "Mg_HCO3" = "#33CCCC", "rainwater" = "#FF3399")
+
+poly = data.frame(
+	x = c(0, 10, 20, 30), 
+	y = c(25, 15, 45, 35)
+)
+poly = data.frame(
+	x = c(0, 20, 32.5, 12.5), 
+	y = c(25, 45, 32.5, 12.5)
+)
+
+#plot nitrate, shape is year
+data_p1 <- all_data %>% 
+    filter(compound %in% c("NO3")) %>% 
+	filter(fluid_type != "NA") 
+
+anno1 <- as.character(expression(paste("atmospheric NO"[3]^"-")))
+anno2 <- as.character(expression(paste("NO"[3]^"-", " generated from nitrification")))
+
+p3 <- ggplot() +
+   scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater")))) +
+	scale_size_continuous(limits=c(0,400))+
+  theme_figure(text_size = 14) +
+	theme(axis.title=element_text(face="bold", size="15", color = "black")) +
+	theme(axis.text=element_text(face="bold")) +
+	#geom_rect(data = data.frame(x = 0, y = 0), aes(xmin=-20, xmax=15, ymin=45, ymax=85), fill = "#FF3399", alpha = .005, size = .2)+
+	annotate(geom = "rect", xmin = -20, xmax = 15, ymin = 45, ymax = 85,
+           fill = "#FF3399", colour = "#FF3399", alpha = 0.005) +
+	annotate(geom = "rect", xmin = -20, xmax = 20, ymin = -10, ymax = 10,
+           fill = "#669900", colour = "#669900", alpha = 0.005) +
+	#geom_rect(data.frame(x = 0, y = 0), aes(xmin=-20, xmax=20, ymin=-10, ymax=10), fill = "#669900", alpha = .005, size = .2)+
+	geom_polygon(data = poly, aes(x=x, y=y), fill = "#330099", color = "#330099", alpha = .005) +
+	annotate("text", x = -12.5, y = 47, label = anno1, parse = TRUE)+
+	annotate("text", x = -7, y = -0.5, label = anno2, parse = TRUE)+
+	geom_segment(aes(x = 2, y = 27, xend = 15, yend = 40),
+                  arrow = arrow(length = unit(0.5, "cm"), type = "closed"), size = 1, linetype = "longdash")+
+	geom_segment(aes(x = 2, y = 27, xend = 15, yend = 33.5),
+                  arrow = arrow(length = unit(0.5, "cm"), type = "closed"), size = 1, linetype = "dotted")+
+  geom_point(data = data_p1, aes(x = d15N, y = d18O, shape = year, size = conc, fill = fluid_type, ymin = d18O - d18O_err, ymax =  d18O + d18O_err, xmin = d15N - d15N_err, xmax = d15N + d15N_err), colour = "black") +
+	annotate("text", x = 9, y = 36, label = "1:1 NR", angle = 42)+
+	annotate("text", x = 10, y = 32.5, label = "2:1 NR", angle = 31)+
+  labs(size = "Concentration [uM]", shape = "Year", x=expression(paste(delta^{15}, "N NO"[3]^"-"* " (\u2030) Air")), y=expression(paste(delta^{18}, "O NO"[3]^"-"* " (\u2030) VSMOW"))) +
+  coord_cartesian(xlim = c(-20,25), ylim = c(0,60)) +
+  guides(fill = guide_legend(override.aes = list(shape = 22, size = 6)), shape = guide_legend(title = "Year"), size = guide_legend(title = as.expression(paste0("Concentration [", "\U003BC", "M]", sep = ""))))
+p3
+ggsave("Figure_3a.tiff", path = "figures/", width = 7.08661, height = 4.7244, device='tiff', bg='white', dpi=300)
+
+
+p4 <- all_data %>% 
+    filter(compound %in% c("Norg")) %>% 
+	filter(fluid_type != "NA") %>%
+  ggplot() + 
+  aes(x = d15N, y = 0, 
+      size = conc, color = fluid_type, fill = fluid_type, shape = year) +
+    scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater")))) +
+	scale_size_continuous(limits=c(0,400))+
+  theme_figure(text_size = 15) +
+	theme(axis.text=element_text(face="bold")) +
+	theme(axis.title.y = element_blank(), axis.title.x = element_text(), panel.grid = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank(), panel.border = element_blank(), legend.position = "right", axis.line.x = element_line(size = 1, linetype = "solid", colour = "black"), legend.text = element_text(color = "white"), legend.title = element_text(color = "white")) +
+  geom_point(aes(size = conc, shape = year, fill = fluid_type), colour = "black") +
+	labs(x=expression(paste(delta^{15}, "N N"[red]* " (\u2030) VSMOW")))+
+	guides(shape = FALSE, fill = FALSE, color = FALSE, size = guide_legend(title = as.expression(paste0("Concentration [", "\U003BC", "M]", sep = "")), override.aes = list(color = NA))) +
+ xlim(-20,25) +
+ ylim(0,0.1)
+p4
+ggsave("Figure_3b.tiff", path = "figures/", width = 7.08661, height = 4.7244, device='tiff', bg='white', dpi=300)
+```
+
+
+## Figure 4
+Cap17O
+```{r}
+d17O <- read_excel(file.path("data","d17O", "d17O.xlsx"))
+	
+d17O$year <- as.factor(d17O$year)
+d17O_pH <- left_join(d17O, combined_df_final_filt %>% ungroup(), by = c("sample_id", "year", "well")) %>% filter(compound == "NO3") %>% select(1:9) %>% group_by(year, well, sample_id, fluid_type, sample, pH) %>% summarize(mean_d18O = mean(d18O), mean_d17O= mean(d17O), mean_cap17O = mean(cap17O), d18O_sd = sd(d18O), d17O_sd = sd(d17O), cap17O_sd = sd(cap17O))
+
+# nitrite end-member mixing 
+#can't have NA values -> should replace with analytical error
+arrow_annotation <- data.frame(
+   x = c(1),
+   y = c(17),
+   label = "NR")
+
+
+d17O_pH$cap17O_sd <- replace_na(d17O_pH$cap17O_sd, 0)
+d17O_pH$d18O_sd <- replace_na(d17O_pH$d18O_sd, 0)
+p17_1 <- d17O_pH %>%
+  ggplot() + 
+  aes(x = mean_cap17O, y = mean_d18O) +
+    scale_shape_manual("", values = c(21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater")))) +
+  theme_figure(text_size = 15) +
+	theme(axis.title=element_text(face="bold", size="15", color = "black")) +
+	theme(axis.text=element_text(face="bold")) +
+  geom_point(aes(shape = year, fill = fluid_type, color = fluid_type), colour = "black", size = 4) +
+	geom_errorbar(aes(xmin = d17O_pH$mean_cap17O - d17O_pH$cap17O_sd, xmax = d17O_pH$mean_cap17O + d17O_pH$cap17O_sd)) +
+	geom_errorbar(aes(ymin = d17O_pH$mean_d18O - d17O_pH$d18O_sd, ymax = d17O_pH$mean_d18O + d17O_pH$d18O_sd)) +
+	geom_abline(linetype = "dashed", size = 1, slope = 3.213, intercept = -0.4) +
+  labs(shape = "year", fill = "fluid type", y=expression(paste(delta^{18}, "O NO"[3]^"-"* " (\u2030) VSMOW")), x=expression(paste(Delta^{17}, "O NO"[3]^"-"* " (\u2030) VSMOW"))) +
+	 xlim(0,20)+
+	 ylim(0,60)+
+	geom_segment(aes(x = 1, y = 5, xend = 1, yend = 15),
+                  arrow = arrow(length = unit(0.5, "cm")), size = 1.2)+
+	geom_text(data=arrow_annotation, aes(x=x, y=y, label=label),                 , 
+           color="black", 
+           size=6, parse = TRUE)+
+  guides(fill = guide_legend(override.aes = list(shape = 22, size = 6)), shape = guide_legend(title = "Year")) 
+p17_1
+
+ggsave("Figure_4.tiff", path = "figures/", width = 7.08661, height = 4.7244, device='tiff', bg='white', dpi=300)
+```
+
+
+## Calculate Terrestrial (Biogeochemical) composition 
+```{r}
+d17O_pH <- left_join(d17O, combined_df_final_filt %>% ungroup(), by = c("sample_id", "year", "well")) %>% filter(compound == "NO3") %>% select(1:9) 
+
+cap17O_rainwater <- d17O_pH %>% filter(well == "rainwater") %>% summarise(., Average = mean(cap17O, na.rm = T))
+cap17O_rainwater <- cap17O_rainwater$Average
+#upper limit 
+cap17O_rainwater_upper <- cap17O_rainwater + 15
+d17O_frac <- d17O %>% mutate(frac_atm = cap17O/cap17O_rainwater, frac_atm_unc = frac_atm - cap17O/cap17O_rainwater_upper)
+
+d17O_summary <- d17O_frac %>% group_by(sample_id) %>%
+  isoprocessor::iso_summarize_data_table(cap17O, frac_atm, frac_atm_unc, d18O, d17O, cutoff = 1) 
+
+frac_atm <- d17O_summary %>% select(c(sample_id, `frac_atm mean`))
+
+frac_atm_wdata <- left_join(frac_atm, combined_df_final_filt %>% ungroup() %>% filter(compound == "NO3"))
+
+rain_d15N <- frac_atm_wdata$`d15N mean`[4]
+rain_d18O <- frac_atm_wdata$`d18O mean`[4]
+
+frac_atm_wdata <- frac_atm_wdata %>% mutate(
+	frac_terrestrial = 1 - `frac_atm mean`,
+	d15N_terrestrial = (`d15N mean` - (`frac_atm mean` * rain_d15N))/frac_terrestrial,
+	d18O_terrestrial = (`d18O mean` - (`frac_atm mean` * rain_d18O))/frac_terrestrial
+) %>% select(c(sample, year, `d15N mean`, `d18O mean`, frac_terrestrial, d15N_terrestrial, d18O_terrestrial)) %>% filter(sample != "rainwater")
+```
+
+
+## Supplemental Figures
+```{r epsilon}
+anno1 = latex2exp::TeX(c("Ca$^{2+}$ - OH$^{-}$", "gabbro", "Mg$^{2+}$ - HCO$_{3}^{-}$", "rainwater"))
+
+#epsilon 18
+p_ep_O <- all_data %>% 
+    filter(compound %in% c("NO3") & fluid_type != "rainwater") %>% 
+	filter(fluid_type != "NA") %>%
+  ggplot(aes(x = log(conc), y = d18O)) +
+   scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(anno1)) +
+	scale_size_continuous(limits=c(0,400))+
+  theme_figure(text_size = 15) +
+	theme(axis.title=element_text(face="bold", size="20", color = "black")) +
+	theme(axis.text=element_text(face="bold")) +
+  geom_point(aes(shape = year, size = conc, fill = fluid_type)) +
+	geom_abline(linetype = "dashed", size = 1, slope = -4.5, intercept = 43) +
+	geom_abline(linetype = "dotted", size = 1, slope = -17.5, intercept = 108) +
+	ylim(0,35)+
+	annotate("text", x = 1.7, y = 30, label = as.character(expression(paste(epsilon^{18}, " ~ -4.5\u2030"))), parse = TRUE, size =4)+
+	annotate("text", x = 5.4, y = 30, label = as.character(expression(paste(epsilon^{18}, " ~ -17.5\u2030"))), parse = TRUE, size =4)+
+  labs(size = expression(paste("Concentration (", mu, "M)")), shape = "Year", x=expression(paste("ln[NO"[3]^"-"*"(", mu, "M)]")), y=expression(paste(delta^{18}, "O NO"[3]^"-"* " (\u2030) VSMOW"))) +
+  #coord_cartesian(xlim = c(-20,40), ylim = c(0,60)) +
+  guides(fill = guide_legend(override.aes = list(shape = 22, size = 6)), shape = guide_legend(title = "Year")) 
+p_ep_O
+
+
+#epsilon 15
+p_ep_N <- all_data %>% 
+    filter(compound %in% c("NO3") & fluid_type != "rainwater") %>% 
+	filter(fluid_type != "NA") %>%
+  ggplot(aes(x = log(conc), y = d15N)) +
+   scale_shape_manual("", values = c(23, 24, 21, 22)) +
+  scale_fill_manual(name = "Fluid Type", values = colors_fluids_named, labels = unname(anno1)) +
+	scale_size_continuous(limits=c(0,400))+
+  theme_figure(text_size = 15) +
+	theme(axis.title=element_text(face="bold", size="20", color = "black"), legend.text = element_text(color = "white"), legend.title = element_text(color = "white")) +
+	theme(axis.text=element_text(face="bold")) +
+  geom_point(aes(shape = year, size = conc, fill = fluid_type)) +
+	geom_abline(linetype = "dashed", size = 1, slope = -4.5, intercept = 34.25) +
+	geom_abline(linetype = "dashed", size = 1, slope = -4.5, intercept = 24.5) +
+	geom_abline(linetype = "dotted", size = 1, slope = -17.5, intercept = 94) +
+	ylim(0,35)+
+	annotate("text", x = 1.75, y = 22, label = as.character(expression(paste(epsilon^{15}, " ~ -4.5\u2030"))), parse = TRUE, size =4)+
+		annotate("text", x = 5.25, y = 22, label = as.character(expression(paste(epsilon^{15}, " ~ -17.5\u2030"))), parse = TRUE, size =4)+
+  labs(x=expression(paste("ln[NO"[3]^"-"*"(", mu, "M)]")), y=expression(paste(delta^{15}, "N NO"[3]^"-"* " (\u2030) VSMOW"))) +
+  #coord_cartesian(xlim = c(-20,40), ylim = c(0,60)) +
+  guides(fill = guide_legend(override.aes = list(color = NA)), shape = FALSE, size = FALSE) 
+p_ep_N
+
+p_ep <- cowplot::plot_grid(p_ep_O, p_ep_N, labels=c("A", "B"), ncol = 1, align = "vh")
+p_ep
+#save_plot("epsilon.pdf", p_ep, base_width = 7.087, base_aspect_ratio = 1.5)
+```
+
+```{r "two end-member mixing"} 
+nitrification <- data.frame("nitrification endmember") 
+names(nitrification) <- ("name")
+nitrification <- nitrification %>% mutate(
+  d15N = 5,
+  d18O = -0.5, 
+  fluid_type = "nitrification endmember", 
+  conc = 10, 
+  compound = "NO3"
+) 
+
+all_data <- all_data %>% mutate(pH = ifelse(well == "rainwater", 5.6, pH))
+all_data_wend <- bind_rows(all_data, nitrification) 
+#all_data_wend <- all_data_wend %>% group_by(sample_id, fluid_type, compound) %>% summarize(d15N = mean(d15N), d18O = mean(d18O), d15N_sd = sd(d15N), d18O_sd = sd(d18O))
+
+
+all_data_wend$fluid_type <- as.factor(all_data_wend$fluid_type)
+p3 <- all_data_wend %>% filter(fluid_type %in% c("nitrification endmember", "alkaline peridotite", "rainwater")) %>%
+    filter(compound %in% c("NO3")) %>% 
+  ggplot() + 
+  aes(x = d15N, y = d18O) +
+  scale_fill_manual (values = c("#330099", "#00FF00", "#999999")) +
+  #theme_bw() +
+  geom_point(aes(size = conc, fill = fluid_type), colour = "black", shape = 21) +
+	geom_smooth(method = "lm") +
+  labs(size = "concentration [uM]",  fill = "fluid type", x=expression(paste(delta^{15}, "N (\u2030)")), y=expression(paste(delta^{18}, "O (\u2030)"))) +
+	theme_figure() +
+  #coord_cartesian(xlim = c(0,60), ylim = c(0,60)) +
+  geom_smooth(method = lm,  se = FALSE, color = "black") +
+  guides(fill = guide_legend(override.aes = list(shape = 22, size = 6))) 
+p3
+
+```
+
+
+## Standards check
+```{r}
+## Load Data
+combined_stds <- bind_rows(
+	read.csv(file = (file.path("data", "calibrated", "run1_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run2_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run3_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run4_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run5_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run6_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run7_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run8_stds_calib_data_export.csv"))),
+	read.csv(file = (file.path("data", "calibrated", "run9_stds_calib_data_export.csv"))) %>% mutate(name = as.character(name), category = as.character(category), compound = as.character(compound)),
+	read.csv(file = (file.path("data", "calibrated", "run10_stds_calib_data_export.csv")))) %>% select(c(category, d15N, d15N_err, d18O, d18O_err))  %>% mutate(category = case_when(
+	category == "USGS34" ~ "USGS-34",
+	category == "USGS40" ~ "USGS-40",
+	category == "USGS65" ~ "USGS-65",
+	TRUE ~ category
+))
+
+stds_summary <- combined_stds %>% group_by(category) %>% iso_summarize_data_table(cutoff = 1, d15N, d18O)
+```
+

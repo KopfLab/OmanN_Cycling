@@ -143,7 +143,7 @@ ggplotly(plot_raw_standards, dynamicTicks = TRUE)
 ### Identify problematic data points
 ```{r "remove problematic data points"}
  df.raw <- df.raw %>% 
- change_category(run_number == 88, "excluded") #area too small
+ change_category(run_number %in% c(88), "excluded") #area too small
 ```
 
 ## Corrections
